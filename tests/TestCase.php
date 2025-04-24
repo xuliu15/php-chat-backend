@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Tests;
 
-use DI\ContainerBuilder;
-use Exception;
 use PHPUnit\Framework\TestCase as PHPUnit_TestCase;
-use Prophecy\PhpUnit\ProphecyTrait;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 use Slim\Factory\AppFactory;
@@ -18,45 +15,39 @@ use Slim\Psr7\Uri;
 
 class TestCase extends PHPUnit_TestCase
 {
-    use ProphecyTrait;
-
     /**
      * @return App
-     * @throws Exception
      */
     protected function getAppInstance(): App
     {
-        // Instantiate PHP-DI ContainerBuilder
-        $containerBuilder = new ContainerBuilder();
-
-        // Container intentionally not compiled for tests.
-
-        // Set up settings
-        $settings = require __DIR__ . '/../app/settings.php';
-        $settings($containerBuilder);
-
-        // Set up dependencies
-        $dependencies = require __DIR__ . '/../app/dependencies.php';
-        $dependencies($containerBuilder);
-
-        // Set up repositories
-        $repositories = require __DIR__ . '/../app/repositories.php';
-        $repositories($containerBuilder);
-
-        // Build PHP-DI Container instance
-        $container = $containerBuilder->build();
-
-        // Instantiate the app
-        AppFactory::setContainer($container);
+        // Create app
         $app = AppFactory::create();
 
-        // Register middleware
-        $middleware = require __DIR__ . '/../app/middleware.php';
-        $middleware($app);
+        // Add middleware to parse JSON body
+        $app->addBodyParsingMiddleware();
 
-        // Register routes
-        $routes = require __DIR__ . '/../app/routes.php';
-        $routes($app);
+        // Add error middleware
+        $app->addErrorMiddleware(true, true, true);
+
+        // Add routes
+        $app->get('/', function (Request $request, Response $response) {
+            $response->getBody()->write(json_encode([
+                'status' => 'success',
+                'message' => 'Chat API is running',
+                'endpoints' => [
+                    'GET /users' => 'Get all users',
+                    'POST /users' => 'Create a new user',
+                    'GET /groups' => 'Get all groups',
+                    'POST /groups' => 'Create a new group',
+                    'POST /messages' => 'Send a message',
+                    'GET /groups/{id}/messages' => 'Get messages from a group'
+                ]
+            ]));
+            return $response->withHeader('Content-Type', 'application/json');
+        });
+
+        // Copy all routes from public/index.php
+        require __DIR__ . '/../public/index.php';
 
         return $app;
     }

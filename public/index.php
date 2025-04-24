@@ -1,82 +1,373 @@
 <?php
 
-declare(strict_types=1);
-
-use App\Application\Handlers\HttpErrorHandler;
-use App\Application\Handlers\ShutdownHandler;
-use App\Application\ResponseEmitter\ResponseEmitter;
-use App\Application\Settings\SettingsInterface;
-use DI\ContainerBuilder;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Factory\AppFactory;
-use Slim\Factory\ServerRequestCreatorFactory;
+use App\Database;
 
 require __DIR__ . '/../vendor/autoload.php';
 
-// Instantiate PHP-DI ContainerBuilder
-$containerBuilder = new ContainerBuilder();
-
-if (false) { // Should be set to true in production
-	$containerBuilder->enableCompilation(__DIR__ . '/../var/cache');
-}
-
-// Set up settings
-$settings = require __DIR__ . '/../app/settings.php';
-$settings($containerBuilder);
-
-// Set up dependencies
-$dependencies = require __DIR__ . '/../app/dependencies.php';
-$dependencies($containerBuilder);
-
-// Set up repositories
-$repositories = require __DIR__ . '/../app/repositories.php';
-$repositories($containerBuilder);
-
-// Build PHP-DI Container instance
-$container = $containerBuilder->build();
-
-// Instantiate the app
-AppFactory::setContainer($container);
+// Create app
 $app = AppFactory::create();
-$callableResolver = $app->getCallableResolver();
 
-// Register middleware
-$middleware = require __DIR__ . '/../app/middleware.php';
-$middleware($app);
-
-// Register routes
-$routes = require __DIR__ . '/../app/routes.php';
-$routes($app);
-
-/** @var SettingsInterface $settings */
-$settings = $container->get(SettingsInterface::class);
-
-$displayErrorDetails = $settings->get('displayErrorDetails');
-$logError = $settings->get('logError');
-$logErrorDetails = $settings->get('logErrorDetails');
-
-// Create Request object from globals
-$serverRequestCreator = ServerRequestCreatorFactory::create();
-$request = $serverRequestCreator->createServerRequestFromGlobals();
-
-// Create Error Handler
-$responseFactory = $app->getResponseFactory();
-$errorHandler = new HttpErrorHandler($callableResolver, $responseFactory);
-
-// Create Shutdown Handler
-$shutdownHandler = new ShutdownHandler($request, $errorHandler, $displayErrorDetails);
-register_shutdown_function($shutdownHandler);
-
-// Add Routing Middleware
-$app->addRoutingMiddleware();
-
-// Add Body Parsing Middleware
+// Add middleware to parse JSON body
 $app->addBodyParsingMiddleware();
 
-// Add Error Middleware
-$errorMiddleware = $app->addErrorMiddleware($displayErrorDetails, $logError, $logErrorDetails);
-$errorMiddleware->setDefaultErrorHandler($errorHandler);
+// Add error middleware
+$app->addErrorMiddleware(true, true, true);
+// Add this before $app->run();
+$app->get('/', function (Request $request, Response $response) {
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'message' => 'Chat API is running',
+        'endpoints' => [
+            'GET /users' => 'Get all users',
+            'POST /users' => 'Create a new user',
+            'GET /groups' => 'Get all groups',
+            'POST /groups' => 'Create a new group',
+            'POST /messages' => 'Send a message',
+            'GET /groups/{id}/messages' => 'Get messages from a group'
+        ]
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
 
-// Run App & Emit Response
-$response = $app->handle($request);
-$responseEmitter = new ResponseEmitter();
-$responseEmitter->emit($response);
+// Add routes
+$app->get('/users', function (Request $request, Response $response) {
+    $db = new Database('chat.db', false);
+    $users = $db->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'data' => $users
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+$app->post('/users', function (Request $request, Response $response) {
+    $data = $request->getParsedBody();
+    
+    // Validate input
+    if (!isset($data['username']) || empty($data['username'])) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Username is required'
+        ]));
+        return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+    }
+
+    $db = new Database('chat.db', false);
+    
+    try {
+        // Check if username already exists
+        $existingUser = $db->query("SELECT id FROM users WHERE username = ?", [$data['username']])->fetch();
+        if ($existingUser) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'Username already exists'
+            ]));
+            return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Create new user
+        $db->query("INSERT INTO users (username) VALUES (?)", [$data['username']]);
+        $userId = $db->getConnection()->lastInsertId();
+        
+        $response->getBody()->write(json_encode([
+            'status' => 'success',
+            'data' => ['id' => $userId, 'username' => $data['username']]
+        ]));
+        return $response->withHeader('Content-Type', 'application/json');
+    } catch (PDOException $e) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]));
+        return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
+    }
+});
+
+// Add more routes
+$app->get('/groups', function (Request $request, Response $response) {
+    $db = new Database('chat.db', false);
+    $groups = $db->query("SELECT * FROM groups")->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'data' => $groups
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+$app->post('/groups', function (Request $request, Response $response) {
+    $data = $request->getParsedBody();
+    
+    // Validate input
+    if (!isset($data['name']) || empty($data['name'])) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Group name is required'
+        ]));
+        return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+    }
+
+    $db = new Database('chat.db', false);
+    
+    try {
+        // Check if group name already exists
+        $existingGroup = $db->query("SELECT id FROM groups WHERE name = ?", [$data['name']])->fetch();
+        if ($existingGroup) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'Group name already exists'
+            ]));
+            return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Create new group
+        $db->query("INSERT INTO groups (name) VALUES (?)", [$data['name']]);
+        $groupId = $db->getConnection()->lastInsertId();
+        
+        $response->getBody()->write(json_encode([
+            'status' => 'success',
+            'data' => ['id' => $groupId, 'name' => $data['name']]
+        ]));
+        return $response->withHeader('Content-Type', 'application/json');
+    } catch (PDOException $e) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]));
+        return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
+    }
+});
+
+// Add message routes
+$app->post('/messages', function (Request $request, Response $response) {
+    $data = $request->getParsedBody();
+    
+    // Validate input
+    if (!isset($data['user_id']) || !isset($data['group_id']) || !isset($data['content']) || empty($data['content'])) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'User ID, Group ID and content are required'
+        ]));
+        return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+    }
+
+    $db = new Database('chat.db', false);
+    
+    try {
+        // First check if user is a member of the group
+        $isMember = $db->query(
+            "SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?",
+            [$data['user_id'], $data['group_id']]
+        )->fetch();
+
+        if (!$isMember) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'User must be a member of the group to send messages'
+            ]));
+            return $response->withStatus(403)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Send message
+        $db->query(
+            "INSERT INTO messages (user_id, group_id, content) VALUES (?, ?, ?)",
+            [$data['user_id'], $data['group_id'], $data['content']]
+        );
+        $messageId = $db->getConnection()->lastInsertId();
+        
+        $response->getBody()->write(json_encode([
+            'status' => 'success',
+            'data' => [
+                'id' => $messageId,
+                'user_id' => $data['user_id'],
+                'group_id' => $data['group_id'],
+                'content' => $data['content']
+            ]
+        ]));
+        return $response->withHeader('Content-Type', 'application/json');
+    } catch (PDOException $e) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Failed to send message'
+        ]));
+        return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
+    }
+});
+
+// Get messages from a group
+$app->get('/groups/{id}/messages', function (Request $request, Response $response, array $args) {
+    $db = new Database('chat.db', false);
+    
+    try {
+        // Check if group exists
+        $group = $db->query("SELECT id FROM groups WHERE id = ?", [$args['id']])->fetch();
+        if (!$group) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'Group not found'
+            ]));
+            return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Get messages with user information
+        $messages = $db->query(
+            "SELECT m.*, u.username 
+             FROM messages m 
+             JOIN users u ON m.user_id = u.id 
+             WHERE m.group_id = ? 
+             ORDER BY m.created_at DESC",
+            [$args['id']]
+        )->fetchAll(PDO::FETCH_ASSOC);
+        
+        $response->getBody()->write(json_encode([
+            'status' => 'success',
+            'data' => $messages
+        ]));
+        return $response->withHeader('Content-Type', 'application/json');
+    } catch (PDOException $e) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Database error: ' . $e->getMessage()
+        ]));
+        return $response->withStatus(500)->withHeader('Content-Type', 'application/json');
+    }
+});
+// Join a group
+// In public/index.php, modify the join group endpoint:
+$app->post('/groups/{id}/join', function (Request $request, Response $response, array $args) {
+    $data = $request->getParsedBody();
+    $db = new Database('chat.db', false);
+    
+    try {
+        // First check if the user and group exist
+        $user = $db->query("SELECT id FROM users WHERE id = ?", [$data['user_id']])->fetch();
+        $group = $db->query("SELECT id FROM groups WHERE id = ?", [$args['id']])->fetch();
+        
+        if (!$user) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'User not found',
+                'debug' => ['user_id' => $data['user_id']]
+            ]));
+            return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
+        }
+        
+        if (!$group) {
+            $response->getBody()->write(json_encode([
+                'status' => 'error',
+                'message' => 'Group not found',
+                'debug' => ['group_id' => $args['id']]
+            ]));
+            return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
+        }
+
+        // Try to join
+        $db->query(
+            "INSERT INTO group_members (user_id, group_id) VALUES (?, ?)",
+            [$data['user_id'], $args['id']]
+        );
+        
+        // Verify the join
+        $membership = $db->query(
+            "SELECT * FROM group_members WHERE user_id = ? AND group_id = ?",
+            [$data['user_id'], $args['id']]
+        )->fetch();
+        
+        $response->getBody()->write(json_encode([
+            'status' => 'success',
+            'message' => 'Joined group successfully',
+            'debug' => [
+                'user_id' => $data['user_id'],
+                'group_id' => $args['id'],
+                'membership' => $membership
+            ]
+        ]));
+        return $response->withHeader('Content-Type', 'application/json');
+    } catch (PDOException $e) {
+        $response->getBody()->write(json_encode([
+            'status' => 'error',
+            'message' => 'Failed to join group',
+            'debug' => [
+                'error' => $e->getMessage(),
+                'user_id' => $data['user_id'],
+                'group_id' => $args['id']
+            ]
+        ]));
+        return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
+    }
+});
+
+// Get group members
+$app->get('/groups/{id}/members', function (Request $request, Response $response, array $args) {
+    $db = new Database('chat.db', false);
+    
+    // First check all tables
+    $allMembers = $db->query("SELECT * FROM group_members")->fetchAll(PDO::FETCH_ASSOC);
+    $allUsers = $db->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC);
+    $allGroups = $db->query("SELECT * FROM groups")->fetchAll(PDO::FETCH_ASSOC);
+    
+    $members = $db->query(
+        "SELECT u.id, u.username 
+         FROM users u 
+         JOIN group_members gm ON u.id = gm.user_id 
+         WHERE gm.group_id = ?",
+        [$args['id']]
+    )->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'data' => $members,
+        'debug' => [
+            'group_id' => $args['id'],
+            'all_members' => $allMembers,
+            'all_users' => $allUsers,
+            'all_groups' => $allGroups
+        ]
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+// Add this to public/index.php
+$app->get('/debug', function (Request $request, Response $response) {
+    $db = new Database('chat.db', false);
+    
+    $users = $db->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC);
+    $groups = $db->query("SELECT * FROM groups")->fetchAll(PDO::FETCH_ASSOC);
+    $members = $db->query("SELECT * FROM group_members")->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'data' => [
+            'users' => $users,
+            'groups' => $groups,
+            'members' => $members
+        ]
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+// Add this cleanup endpoint
+$app->post('/debug/cleanup', function (Request $request, Response $response) {
+    $db = new Database('chat.db', false);
+    
+    // Delete all data from tables in correct order
+    $db->query("DELETE FROM messages");
+    $db->query("DELETE FROM group_members");
+    $db->query("DELETE FROM users");
+    $db->query("DELETE FROM groups");
+    
+    $response->getBody()->write(json_encode([
+        'status' => 'success',
+        'message' => 'All data cleared'
+    ]));
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+
+
+// Run app
+$app->run();
