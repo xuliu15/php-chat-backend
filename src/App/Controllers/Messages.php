@@ -5,7 +5,6 @@ namespace App\Controllers;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\ResponseInterface as Response;
 use App\Repositories\MessageRepository;
-use App\Repositories\GroupRepository;
 use Valitron\Validator;
 
 class Messages {
@@ -47,13 +46,5 @@ class Messages {
             ]));
             return $response->withStatus(400);
         }
-    }
-
-    public function getMessages(Request $request, Response $response): Response {
-        $body = $request->getParsedBody();
-        $messages = $this->messageRepository->getMessagesbyGroupId($body['groupId']);
-        $body=json_encode(['message' => 'Messages fetched successfully', 'data' => $messages]);
-        $response->getBody()->write($body);
-        return $response->withHeader('Content-Type', 'application/json');
     }
 }

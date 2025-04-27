@@ -20,15 +20,19 @@ run on a local server:
 `php -S localhost:8080 -t public`
 
 To create a user:
+
 `curl -X POST "http://localhost:8080/api/users" \
      -H "Content-Type: application/json" \
      -d '{"username": "Joy"}'`
+
 To create a group:
+
 `curl -X POST "http://localhost:8080/api/groups" \
      -H "Content-Type: application/json" \
      -d '{"name": "Joy Chatroom"}'`
 
 To join a group:
+
 `curl -X POST "http://localhost:8080/api/groups/join" \
      -H "Content-Type: application/json" \
      -d '{"userId": 1, "groupId": 1}'`
