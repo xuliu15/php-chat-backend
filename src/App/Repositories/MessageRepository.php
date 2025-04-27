@@ -11,21 +11,23 @@ class MessageRepository {
 
     }
     public function createMessage(array $data): array {
-        $sql = "INSERT INTO messages (content, user_id, group_id) VALUES (:content, :user_id, :group_id)";
         $pdo = $this->database->getConnection();
+        
+        $sql = "INSERT INTO messages (group_id, user_id, content) VALUES (:group_id, :user_id, :content)";
         $stmt = $pdo->prepare($sql);
-        $stmt->bindValue(':content', $data['content'], PDO::PARAM_STR);
-        $stmt->bindValue(':user_id', $data['userId'], PDO::PARAM_INT);
         $stmt->bindValue(':group_id', $data['groupId'], PDO::PARAM_INT);
+        $stmt->bindValue(':user_id', $data['userId'], PDO::PARAM_INT);
+        $stmt->bindValue(':content', $data['content'], PDO::PARAM_STR);
         $stmt->execute();
         
         return [
             'id' => $pdo->lastInsertId(),
-            'content' => $data['content'],
+            'group_id' => $data['groupId'],
             'user_id' => $data['userId'],
-            'group_id' => $data['groupId']
+            'content' => $data['content']
         ];
     }
+    
     public function getMessagesbyGroupId(int $groupId): array {
         $sql = "SELECT * FROM messages WHERE group_id = :group_id";
         $pdo = $this->database->getConnection();
