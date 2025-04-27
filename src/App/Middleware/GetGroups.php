@@ -18,13 +18,12 @@ class GetGroups {
         $context = RouteContext::fromRequest($request);
         $route = $context->getRoute();
         $groupId = $route->getArgument('groupId');
-        $group = $this->groupRepository->getGroupById($groupId);
+        $group = $this->groupRepository->getGroupById((int) $groupId);
         if ($group === false) {
             throw new HttpNotFoundException($request,
             message: "Group not found");
         }
         $request = $request->withAttribute('group', $group);
-        return $response = handler->handle($request);
-
-}   
+        return $response = $handler->handle($request);
+}
 }   
