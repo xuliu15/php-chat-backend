@@ -1,5 +1,5 @@
 # bunq-chat
- This is a chat application backend in PHP, using Slim framework. 
+ This is a chat application backend in PHP, using Slim framework. The code is developed and tested on MacOS.
 
  ## Features:
  - create chat groups
@@ -65,9 +65,9 @@ vlucas/valitron: a validation library to validate the inputs for sending message
 php-di/php-di: a dependency injection library to handle creation and injection of dependencies.
 
 ## Limitations and improvements:
-- limited capbilities to handle edge cases.
-- limited error handling.
-- limited code formatting. 
+- Limited capabilities to handle edge cases.
+- Limited error handling.
+- Limited code formatting. 
 
 ## Credits
 This project is inspired by https://github.com/daveh/slim-rest-api-example
